@@ -1,0 +1,456 @@
+{
+  "name": "Applyme PRO (Webhook -> Emails -> Sheets -> OpenAI -> PDF -> SMTP)",
+  "nodes": [
+    {
+      "parameters": {
+        "path": "applyme/apply",
+        "httpMethod": "POST",
+        "responseMode": "usingRespondToWebhook",
+        "options": {
+          "allowedOrigins": "*"
+        }
+      },
+      "id": "n1_webhook",
+      "name": "Webhook Intake",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [260, 260]
+    },
+    {
+      "parameters": {
+        "jsCode": "const b = $json;\n\nconst required = [\n  'platform','jobType','jobDescription',\n  'candidateName','candidateEmail'\n];\n\nfor (const k of required) {\n  if (!b[k] || String(b[k]).trim() === '') {\n    throw new Error(`Champ manquant: ${k}`);\n  }\n}\n\nconst platform = String(b.platform).toLowerCase().trim();\nconst jobType = String(b.jobType).toLowerCase().trim();\n\nconst allowedPlatform = new Set(['linkedin','indeed']);\nconst allowedJobType = new Set(['stage','alternance','cdi','cdd']);\n\nif (!allowedPlatform.has(platform)) throw new Error('platform invalide (linkedin|indeed)');\nif (!allowedJobType.has(jobType)) throw new Error('jobType invalide (stage|alternance|cdi|cdd)');\n\nconst cvText = (b.cvText || '').trim();\nif (!cvText) {\n  // Pour un workflow vraiment fiable, envoie cvText depuis ton backend.\n  // (Sinon, ajoute un pipeline PDF->text.)\n  throw new Error('cvText manquant. Envoie le texte du CV (cvText) depuis ton site/backend.');\n}\n\nreturn [{\n  platform,\n  jobType,\n  job: {\n    url: b.jobUrl || '',\n    title: b.jobTitle || '',\n    company: b.company || '',\n    location: b.location || '',\n    description: String(b.jobDescription)\n  },\n  candidate: {\n    name: String(b.candidateName),\n    email: String(b.candidateEmail)\n  },\n  cvText,\n  meta: {\n    executionId: $execution.id,\n    receivedAt: new Date().toISOString()\n  }\n}];"
+      },
+      "id": "n2_normalize",
+      "name": "Normalize & Validate",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [520, 260]
+    },
+    {
+      "parameters": {
+        "jsCode": "const text = ($json.job?.description || '');\nconst matches = text.match(/[a-z0-9._%+-]+@[a-z0-9.-]+\\.[a-z]{2,}/gi) || [];\nconst emails = [...new Set(matches.map(e => e.toLowerCase()))];\n\nreturn [{\n  ...$json,\n  extractedEmails: emails,\n  extractedEmailCount: emails.length\n}];"
+      },
+      "id": "n3_extract",
+      "name": "Extract Emails",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [780, 260]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "number": [
+            {
+              "value1": "={{$json.extractedEmailCount}}",
+              "operation": "larger",
+              "value2": 0
+            }
+          ]
+        }
+      },
+      "id": "n4_if_has_emails",
+      "name": "IF Emails Found?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [1020, 260]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={\n  \"ok\": true,\n  \"message\": \"Aucun email trouvé dans jobDescription. Rien à envoyer.\",\n  \"platform\": $json.platform,\n  \"jobType\": $json.jobType,\n  \"company\": $json.job.company,\n  \"jobTitle\": $json.job.title,\n  \"count\": $json.extractedEmailCount,\n  \"emails\": $json.extractedEmails,\n  \"executionId\": $json.meta.executionId\n}",
+        "options": {}
+      },
+      "id": "n5_respond_no_emails",
+      "name": "Respond (No Emails)",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [1240, 420]
+    },
+    {
+      "parameters": {
+        "jsCode": "const targets = ($json.extractedEmails || []).map(email => ({ email }));\nreturn targets.map(t => ({\n  platform: $json.platform,\n  jobType: $json.jobType,\n  job: $json.job,\n  candidate: $json.candidate,\n  cvText: $json.cvText,\n  meta: $json.meta,\n  target: t\n}));"
+      },
+      "id": "n6_explode_targets",
+      "name": "Explode Targets (1 item = 1 email)",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1240, 220]
+    },
+    {
+      "parameters": {
+        "batchSize": 1,
+        "options": {}
+      },
+      "id": "n7_split_batches",
+      "name": "Split In Batches (1)",
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [1460, 220]
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": "={{$env.GSHEET_DOCUMENT_ID}}",
+        "sheetName": "={{$env.GSHEET_TAB_NAME || \"applications\"}}",
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "timestamp": "={{$now}}",
+            "executionId": "={{$json.meta.executionId}}",
+            "platform": "={{$json.platform}}",
+            "jobType": "={{$json.jobType}}",
+            "company": "={{$json.job.company}}",
+            "jobTitle": "={{$json.job.title}}",
+            "jobUrl": "={{$json.job.url}}",
+            "targetEmail": "={{$json.target.email}}",
+            "status": "pending",
+            "error": "",
+            "atsScore": "",
+            "matchedKeywords": "",
+            "missingKeywords": ""
+          }
+        },
+        "options": {
+          "rawData": false
+        }
+      },
+      "id": "n8_sheets_append",
+      "name": "Google Sheets - Append Row (Pending)",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4,
+      "position": [1680, 220],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "REPLACE_WITH_YOUR_CREDENTIAL_ID",
+          "name": "Google Sheets OAuth2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const out = items[0].json;\n// Google Sheets node renvoie souvent des champs variés selon version.\n// On capture ce qu'on peut pour pouvoir faire un update ensuite.\n\nconst sheetResult = $json;\nconst rowNumber = sheetResult?.rowNumber || sheetResult?.addedRowNumber || sheetResult?.row || null;\n\nreturn [{\n  ...out,\n  sheets: {\n    appendResult: sheetResult,\n    rowNumber\n  }\n}];"
+      },
+      "id": "n9_capture_row",
+      "name": "Capture Sheet Row Number",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1900, 220]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.openai.com/v1/responses",
+        "authentication": "none",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "={{\"Bearer \" + $env.OPENAI_API_KEY}}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "json",
+        "jsonBody": "={\n  \"model\": \"gpt-4.1-mini\",\n  \"temperature\": 0.3,\n  \"input\": [\n    {\n      \"role\": \"system\",\n      \"content\": [\n        {\n          \"type\": \"text\",\n          \"text\": \"Tu es un expert recrutement + rédaction CV ATS. Règles: (1) ne jamais inventer d'expériences, diplômes, certifications, entreprises ou compétences non présentes dans le CV source; (2) optimiser ATS: sections claires, puces, mots-clés pertinents de l'offre, sans bourrage; (3) cohérence stricte: la lettre doit refléter exactement le CV; (4) produire un JSON STRICT conforme au schéma demandé; (5) écris en français professionnel.\"\n        }\n      ]\n    },\n    {\n      \"role\": \"user\",\n      \"content\": [\n        {\n          \"type\": \"text\",\n          \"text\": \"CONTEXTE\\nPlatform: {{$json.platform}}\\nType: {{$json.jobType}}\\nEntreprise: {{$json.job.company}}\\nPoste: {{$json.job.title}}\\nLieu: {{$json.job.location}}\\nURL: {{$json.job.url}}\\n\\nOFFRE (texte)\\n{{$json.job.description}}\\n\\nCANDIDAT\\nNom: {{$json.candidate.name}}\\nEmail: {{$json.candidate.email}}\\n\\nCV SOURCE (texte)\\n{{$json.cvText}}\\n\\nCIBLE\\nEmail entreprise: {{$json.target.email}}\\n\\nSCHÉMA JSON STRICT À PRODUIRE (aucun texte hors JSON):\\n{\\n  \\\"ats\\\": {\\\"score\\\": 0, \\\"matched_keywords\\\": [], \\\"missing_keywords\\\": [], \\\"notes\\\": \\\"\\\"},\\n  \\\"resume\\\": {\\n    \\\"header\\\": {\\\"name\\\": \\\"\\\", \\\"email\\\": \\\"\\\"},\\n    \\\"summary\\\": \\\"\\\",\\n    \\\"skills\\\": {\\\"hard\\\": [], \\\"soft\\\": [], \\\"tools\\\": []},\\n    \\\"experience\\\": [{\\\"title\\\":\\\"\\\",\\\"company\\\":\\\"\\\",\\\"dates\\\":\\\"\\\",\\\"bullets\\\":[\\\"\\\"]}],\\n    \\\"education\\\": [{\\\"degree\\\":\\\"\\\",\\\"school\\\":\\\"\\\",\\\"dates\\\":\\\"\\\"}],\\n    \\\"projects\\\": [{\\\"name\\\":\\\"\\\",\\\"bullets\\\":[\\\"\\\"]}]\\n  },\\n  \\\"cover_letter\\\": {\\\"subject\\\": \\\"\\\", \\\"body\\\": \\\"\\\"}\\n}\\n\\nLe score ATS est une estimation interne basée sur correspondance de mots-clés et structure ATS (pas une promesse).\"\n        }\n      ]\n    }\n  ]\n}",
+        "options": {
+          "timeout": 120000
+        }
+      },
+      "id": "n10_openai",
+      "name": "OpenAI (Responses API) - Generate CV+Letter JSON",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [2120, 220]
+    },
+    {
+      "parameters": {
+        "jsCode": "function extractTextFromResponsesApi(resp) {\n  // Tentatives robustes selon variantes\n  // resp.output_text existe souvent\n  if (resp && typeof resp.output_text === 'string' && resp.output_text.trim()) return resp.output_text;\n\n  // Sinon, parcourir output\n  const out = resp?.output;\n  if (Array.isArray(out)) {\n    for (const item of out) {\n      const content = item?.content;\n      if (Array.isArray(content)) {\n        for (const c of content) {\n          if (c?.type === 'output_text' && typeof c?.text === 'string') return c.text;\n          if (c?.type === 'text' && typeof c?.text === 'string') return c.text;\n        }\n      }\n    }\n  }\n  return '';\n}\n\nconst resp = $json;\nconst text = extractTextFromResponsesApi(resp);\nif (!text) throw new Error('Réponse OpenAI: texte introuvable');\n\nlet ai;\ntry {\n  ai = JSON.parse(text);\n} catch (e) {\n  // Parfois le modèle renvoie du texte autour. On tente d'extraire un bloc JSON.\n  const start = text.indexOf('{');\n  const end = text.lastIndexOf('}');\n  if (start === -1 || end === -1 || end <= start) throw new Error('JSON OpenAI invalide (parse impossible)');\n  ai = JSON.parse(text.slice(start, end + 1));\n}\n\nreturn [{\n  ...$items('Capture Sheet Row Number')[0].json,\n  ai\n}];"
+      },
+      "id": "n11_parse_ai",
+      "name": "Parse OpenAI JSON",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2340, 220]
+    },
+    {
+      "parameters": {
+        "jsCode": "const data = $json.ai;\n\nconst esc = (s) => String(s ?? '')\n  .replace(/&/g,'&amp;')\n  .replace(/</g,'&lt;')\n  .replace(/>/g,'&gt;');\n\nconst cv = data.resume;\n\nconst cvHtml = `\n<html><head><meta charset=\"utf-8\">\n<style>\nbody{font-family:Arial, sans-serif; font-size:12px; color:#111; margin:32px}\nh1{font-size:18px;margin:0}\nh2{font-size:14px;margin-top:14px;border-bottom:1px solid #ddd;padding-bottom:4px}\nul{margin:6px 0 0 18px}\n.small{color:#444;font-size:11px}\n</style></head><body>\n<h1>${esc(cv.header?.name)}</h1>\n<div class=\"small\">${esc(cv.header?.email)}</div>\n\n<h2>Résumé</h2>\n<div>${esc(cv.summary)}</div>\n\n<h2>Compétences</h2>\n<div><b>Tech:</b> ${(cv.skills?.hard||[]).map(esc).join(', ')}</div>\n<div><b>Outils:</b> ${(cv.skills?.tools||[]).map(esc).join(', ')}</div>\n<div><b>Soft:</b> ${(cv.skills?.soft||[]).map(esc).join(', ')}</div>\n\n<h2>Expérience</h2>\n${(cv.experience||[]).map(x => `\n  <div><b>${esc(x.title)}</b> — ${esc(x.company)} <span class=\"small\">(${esc(x.dates)})</span></div>\n  <ul>${(x.bullets||[]).map(b=>`<li>${esc(b)}</li>`).join('')}</ul>\n`).join('')}\n\n<h2>Formation</h2>\n${(cv.education||[]).map(e => `<div><b>${esc(e.degree)}</b> — ${esc(e.school)} <span class=\"small\">(${esc(e.dates)})</span></div>`).join('')}\n\n<h2>Projets</h2>\n${(cv.projects||[]).map(p => `\n  <div><b>${esc(p.name)}</b></div>\n  <ul>${(p.bullets||[]).map(b=>`<li>${esc(b)}</li>`).join('')}</ul>\n`).join('')}\n\n</body></html>`;\n\nconst letter = data.cover_letter;\nconst letterHtml = `\n<html><head><meta charset=\"utf-8\">\n<style>\nbody{font-family:Arial, sans-serif; font-size:12px; color:#111; margin:32px}\n</style></head><body>\n<div><b>Objet:</b> ${esc(letter?.subject)}</div>\n<br/>\n<div style=\"white-space:pre-wrap\">${esc(letter?.body)}</div>\n</body></html>`;\n\nreturn [{\n  ...$json,\n  cvHtml,\n  letterHtml\n}];"
+      },
+      "id": "n12_build_html",
+      "name": "Build ATS HTML (CV + Letter)",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2560, 220]
+    },
+    {
+      "parameters": {
+        "jsCode": "const cvBuf = Buffer.from($json.cvHtml, 'utf8');\nconst letterBuf = Buffer.from($json.letterHtml, 'utf8');\n\nconst cvBinary = await this.helpers.prepareBinaryData(cvBuf, 'cv.html', 'text/html');\nconst letterBinary = await this.helpers.prepareBinaryData(letterBuf, 'letter.html', 'text/html');\n\nreturn [{\n  json: $json,\n  binary: {\n    cvHtmlFile: cvBinary,\n    letterHtmlFile: letterBinary\n  }\n}];"
+      },
+      "id": "n13_make_binary_html",
+      "name": "Make Binary HTML Files",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2780, 220]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://gotenberg:3000/forms/chromium/convert/html",
+        "sendBody": true,
+        "contentType": "multipart-form-data",
+        "sendBinaryData": true,
+        "binaryPropertyName": "cvHtmlFile",
+        "options": {
+          "timeout": 120000
+        }
+      },
+      "id": "n14_gotenberg_cv",
+      "name": "Gotenberg - CV HTML to PDF",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [3000, 180]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://gotenberg:3000/forms/chromium/convert/html",
+        "sendBody": true,
+        "contentType": "multipart-form-data",
+        "sendBinaryData": true,
+        "binaryPropertyName": "letterHtmlFile",
+        "options": {
+          "timeout": 120000
+        }
+      },
+      "id": "n15_gotenberg_letter",
+      "name": "Gotenberg - Letter HTML to PDF",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [3000, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Regroupe les deux PDFs en binaire pour SMTP\n// Les nodes HTTP Request renvoient souvent le PDF en binaire sous la propriété 'data'\n\nconst base = $items('Build ATS HTML (CV + Letter)')[0].json;\n\nconst cvPdfBin = $items('Gotenberg - CV HTML to PDF')[0].binary?.data;\nconst letterPdfBin = $items('Gotenberg - Letter HTML to PDF')[0].binary?.data;\n\nif (!cvPdfBin) throw new Error('PDF CV manquant (binaire)');\nif (!letterPdfBin) throw new Error('PDF Lettre manquant (binaire)');\n\n// Renommer pour pièces jointes\ncvPdfBin.fileName = `CV_${(base.candidate?.name||'Candidat').replace(/\\s+/g,'_')}_${(base.job?.company||'Entreprise').replace(/\\s+/g,'_')}.pdf`;\ncvPdfBin.mimeType = 'application/pdf';\n\nletterPdfBin.fileName = `Lettre_${(base.candidate?.name||'Candidat').replace(/\\s+/g,'_')}_${(base.job?.company||'Entreprise').replace(/\\s+/g,'_')}.pdf`;\nletterPdfBin.mimeType = 'application/pdf';\n\nreturn [{\n  json: base,\n  binary: {\n    cvPdf: cvPdfBin,\n    letterPdf: letterPdfBin\n  }\n}];"
+      },
+      "id": "n16_prepare_attachments",
+      "name": "Prepare Attachments (CV+Letter PDFs)",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [3220, 240]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "string": [
+            {
+              "value1": "={{$json.target.email}}",
+              "operation": "isNotEmpty"
+            }
+          ]
+        }
+      },
+      "id": "n17_if_target_email",
+      "name": "IF Target Email Present?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [3440, 240]
+    },
+    {
+      "parameters": {
+        "fromEmail": "={{$env.SMTP_FROM}}",
+        "toEmail": "={{$json.target.email}}",
+        "subject": "={{$json.ai.cover_letter.subject}}",
+        "text": "={{$json.ai.cover_letter.body}}",
+        "attachments": [
+          {
+            "binaryPropertyName": "cvPdf"
+          },
+          {
+            "binaryPropertyName": "letterPdf"
+          }
+        ],
+        "options": {}
+      },
+      "id": "n18_smtp_send",
+      "name": "SMTP Send (CV+Letter)",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2,
+      "position": [3660, 200],
+      "credentials": {
+        "smtp": {
+          "id": "REPLACE_WITH_YOUR_SMTP_CREDENTIAL_ID",
+          "name": "SMTP Account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "documentId": "={{$env.GSHEET_DOCUMENT_ID}}",
+        "sheetName": "={{$env.GSHEET_TAB_NAME || \"applications\"}}",
+        "updateKey": "rowNumber",
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "status": "sent",
+            "error": "",
+            "atsScore": "={{$json.ai.ats.score}}",
+            "matchedKeywords": "={{($json.ai.ats.matched_keywords || []).join(\", \")}}",
+            "missingKeywords": "={{($json.ai.ats.missing_keywords || []).join(\", \")}}"
+          }
+        },
+        "options": {}
+      },
+      "id": "n19_sheets_update_sent",
+      "name": "Google Sheets - Update Row (Sent)",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4,
+      "position": [3880, 200],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "REPLACE_WITH_YOUR_CREDENTIAL_ID",
+          "name": "Google Sheets OAuth2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "documentId": "={{$env.GSHEET_DOCUMENT_ID}}",
+        "sheetName": "={{$env.GSHEET_TAB_NAME || \"applications\"}}",
+        "updateKey": "rowNumber",
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "status": "failed",
+            "error": "={{$json._errorMessage || \"Email cible vide\"}}"
+          }
+        },
+        "options": {}
+      },
+      "id": "n20_sheets_update_failed",
+      "name": "Google Sheets - Update Row (Failed)",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4,
+      "position": [3660, 340],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "REPLACE_WITH_YOUR_CREDENTIAL_ID",
+          "name": "Google Sheets OAuth2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "return [{\n  ok: true,\n  message: 'Traitement terminé (emails traités un par un).',\n  executionId: $items('Normalize & Validate')[0].json.meta.executionId,\n  platform: $items('Normalize & Validate')[0].json.platform,\n  jobType: $items('Normalize & Validate')[0].json.jobType,\n  company: $items('Normalize & Validate')[0].json.job.company,\n  jobTitle: $items('Normalize & Validate')[0].json.job.title,\n  extractedEmailCount: $items('Extract Emails')[0].json.extractedEmailCount,\n  extractedEmails: $items('Extract Emails')[0].json.extractedEmails\n}];"
+      },
+      "id": "n21_summary",
+      "name": "Build Summary Response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [4100, 220]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{$json}}",
+        "options": {}
+      },
+      "id": "n22_respond_ok",
+      "name": "Respond (OK)",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [4320, 220]
+    }
+  ],
+  "connections": {
+    "Webhook Intake": {
+      "main": [[{ "node": "Normalize & Validate", "type": "main", "index": 0 }]]
+    },
+    "Normalize & Validate": {
+      "main": [[{ "node": "Extract Emails", "type": "main", "index": 0 }]]
+    },
+    "Extract Emails": {
+      "main": [[{ "node": "IF Emails Found?", "type": "main", "index": 0 }]]
+    },
+    "IF Emails Found?": {
+      "main": [
+        [{ "node": "Explode Targets (1 item = 1 email)", "type": "main", "index": 0 }],
+        [{ "node": "Respond (No Emails)", "type": "main", "index": 0 }]
+      ]
+    },
+    "Explode Targets (1 item = 1 email)": {
+      "main": [[{ "node": "Split In Batches (1)", "type": "main", "index": 0 }]]
+    },
+    "Split In Batches (1)": {
+      "main": [[{ "node": "Google Sheets - Append Row (Pending)", "type": "main", "index": 0 }]]
+    },
+    "Google Sheets - Append Row (Pending)": {
+      "main": [[{ "node": "Capture Sheet Row Number", "type": "main", "index": 0 }]]
+    },
+    "Capture Sheet Row Number": {
+      "main": [[{ "node": "OpenAI (Responses API) - Generate CV+Letter JSON", "type": "main", "index": 0 }]]
+    },
+    "OpenAI (Responses API) - Generate CV+Letter JSON": {
+      "main": [[{ "node": "Parse OpenAI JSON", "type": "main", "index": 0 }]]
+    },
+    "Parse OpenAI JSON": {
+      "main": [[{ "node": "Build ATS HTML (CV + Letter)", "type": "main", "index": 0 }]]
+    },
+    "Build ATS HTML (CV + Letter)": {
+      "main": [[{ "node": "Make Binary HTML Files", "type": "main", "index": 0 }]]
+    },
+    "Make Binary HTML Files": {
+      "main": [
+        [{ "node": "Gotenberg - CV HTML to PDF", "type": "main", "index": 0 }],
+        [{ "node": "Gotenberg - Letter HTML to PDF", "type": "main", "index": 0 }]
+      ]
+    },
+    "Gotenberg - CV HTML to PDF": {
+      "main": [[{ "node": "Prepare Attachments (CV+Letter PDFs)", "type": "main", "index": 0 }]]
+    },
+    "Gotenberg - Letter HTML to PDF": {
+      "main": [[{ "node": "Prepare Attachments (CV+Letter PDFs)", "type": "main", "index": 0 }]]
+    },
+    "Prepare Attachments (CV+Letter PDFs)": {
+      "main": [[{ "node": "IF Target Email Present?", "type": "main", "index": 0 }]]
+    },
+    "IF Target Email Present?": {
+      "main": [
+        [{ "node": "SMTP Send (CV+Letter)", "type": "main", "index": 0 }],
+        [{ "node": "Google Sheets - Update Row (Failed)", "type": "main", "index": 0 }]
+      ]
+    },
+    "SMTP Send (CV+Letter)": {
+      "main": [[{ "node": "Google Sheets - Update Row (Sent)", "type": "main", "index": 0 }]]
+    },
+    "Google Sheets - Update Row (Sent)": {
+      "main": [
+        [{ "node": "Split In Batches (1)", "type": "main", "index": 0 }],
+        [{ "node": "Build Summary Response", "type": "main", "index": 0 }]
+      ]
+    },
+    "Google Sheets - Update Row (Failed)": {
+      "main": [
+        [{ "node": "Split In Batches (1)", "type": "main", "index": 0 }],
+        [{ "node": "Build Summary Response", "type": "main", "index": 0 }]
+      ]
+    },
+    "Build Summary Response": {
+      "main": [[{ "node": "Respond (OK)", "type": "main", "index": 0 }]]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionTimeout": 3600,
+    "saveExecutionProgress": true,
+    "saveManualExecutions": true,
+    "errorWorkflow": ""
+  },
+  "versionId": "1"
+}

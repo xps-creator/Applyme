@@ -1,0 +1,278 @@
+﻿<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8" />
+  <title>Applyme · Home</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700;900&display=swap" rel="stylesheet">
+
+  <style>
+    :root{
+      --bg:#020617;
+      --card:rgba(255,255,255,.08);
+      --border:rgba(255,255,255,.18);
+      --primary:#38bdf8;
+      --accent:#22d3ee;
+      --text:#e5e7eb;
+      --muted:#94a3b8;
+    }
+
+    *{box-sizing:border-box}
+
+    body{
+      margin:0;
+      font-family:Inter,system-ui,sans-serif;
+      background:
+        radial-gradient(1200px 600px at 10% -10%, #1e293b 0%, transparent 60%),
+        radial-gradient(800px 500px at 90% 10%, #0f172a 0%, transparent 55%),
+        var(--bg);
+      color:var(--text);
+    }
+
+    /* NAV */
+    .nav{
+      position:sticky;
+      top:0;
+      z-index:10;
+      backdrop-filter:blur(16px);
+      background:rgba(2,6,23,.65);
+      border-bottom:1px solid var(--border);
+    }
+    .nav-inner{
+      max-width:1200px;
+      margin:auto;
+      padding:18px 28px;
+      display:flex;
+      justify-content:space-between;
+      align-items:center;
+    }
+    .logo{
+      font-weight:900;
+      font-size:22px;
+      background:linear-gradient(90deg,var(--primary),var(--accent));
+        -webkit-background-clip: text;
+  background-clip: text;              /* standard */
+  -webkit-text-fill-color: transparent;
+    }
+    .nav a{
+      color:var(--muted);
+      text-decoration:none;
+      font-weight:600;
+      margin-left:20px;
+    }
+    .nav a:hover{color:var(--primary)}
+
+    /* HERO */
+    .hero{
+      min-height:90vh;
+      display:flex;
+      align-items:center;
+      justify-content:center;
+      text-align:center;
+      padding:80px 24px;
+    }
+    h1{
+      margin:0;
+      font-size:64px;
+      line-height:1.05;
+      font-weight:900;
+      background:linear-gradient(90deg,var(--primary),var(--accent));
+        -webkit-background-clip: text;
+  background-clip: text;              /* standard */
+  -webkit-text-fill-color: transparent;
+    }
+    .subtitle{
+      max-width:680px;
+      margin:22px auto 0;
+      font-size:18px;
+      color:var(--muted);
+    }
+    .cta{
+      margin-top:36px;
+      display:flex;
+      gap:16px;
+      justify-content:center;
+      flex-wrap:wrap;
+    }
+
+    .btn{
+      padding:14px 26px;
+      border-radius:16px;
+      font-weight:700;
+      font-size:15px;
+      border:0;
+      cursor:pointer;
+      background:linear-gradient(135deg,var(--primary),var(--accent));
+      color:#020617;
+      transition:.35s ease;
+    }
+    .btn:hover{
+      transform:translateY(-2px);
+      box-shadow:0 0 40px rgba(56,189,248,.55);
+    }
+    .btn-outline{
+      background:transparent;
+      color:var(--text);
+      border:1px solid var(--border);
+    }
+
+    /* FEATURES */
+    .features{
+      max-width:1200px;
+      margin:auto;
+      padding:40px 24px 80px;
+      display:grid;
+      gap:24px;
+    }
+    @media(min-width:900px){
+      .features{grid-template-columns:repeat(3,1fr)}
+    }
+    .feature{
+      background:var(--card);
+      border:1px solid var(--border);
+      border-radius:22px;
+      padding:28px;
+      transition:.4s ease;
+    }
+    .feature:hover{
+      transform:translateY(-8px);
+      box-shadow:0 30px 70px rgba(0,0,0,.6);
+    }
+    .feature h3{margin:0 0 10px}
+    .feature p{margin:0;color:var(--muted);font-size:14px}
+
+    /* PLANS */
+    .plans{
+      padding:100px 24px;
+      background:linear-gradient(180deg,transparent,#020617);
+    }
+    .plans h2{
+      text-align:center;
+      font-size:38px;
+      margin-bottom:14px;
+    }
+    .plans .subtitle{text-align:center}
+
+    .grid{
+      display:grid;
+      gap:26px;
+      max-width:1100px;
+      margin:60px auto 0;
+    }
+    @media(min-width:900px){
+      .grid{grid-template-columns:repeat(3,1fr)}
+    }
+    .card{
+      background:var(--card);
+      border:1px solid var(--border);
+      border-radius:26px;
+      padding:36px 30px;
+      text-align:center;
+      transition:.45s ease;
+      position:relative;
+      overflow:hidden;
+    }
+    .card::after{
+      content:"";
+      position:absolute;
+      inset:0;
+      background:linear-gradient(120deg,transparent 30%,rgba(56,189,248,.25),transparent 70%);
+      transform:translateX(-100%);
+    }
+    .card:hover::after{animation:scan 1.2s ease}
+    .card:hover{transform:translateY(-12px)}
+    @keyframes scan{to{transform:translateX(100%)}}
+
+    .price{
+      font-size:42px;
+      font-weight:900;
+      color:var(--primary);
+      margin:14px 0;
+    }
+    .card p{color:var(--muted)}
+
+    /* FOOTER */
+    footer{
+      border-top:1px solid var(--border);
+      text-align:center;
+      padding:28px;
+      color:var(--muted);
+      font-size:13px;
+    }
+  </style>
+</head>
+<body>
+
+  <nav class="nav">
+    <div class="nav-inner">
+      <div class="logo">Applyme</div>
+      <div>
+        <a href="#features">Fonctionnalités</a>
+        <a href="#plans">Plans</a>
+        <a href="auth.html">Connexion</a>
+      </div>
+    </div>
+  </nav>
+
+  <section class="hero">
+    <div>
+      <h1>Postule plus vite.<br>Plus intelligemment.</h1>
+      <p class="subtitle">
+        Applyme automatise, organise et optimise tes candidatures grâce à une IA nouvelle génération.
+      </p>
+      <div class="cta">
+        <a href="auth.html"><button class="btn">Commencer gratuitement</button></a>
+        <a href="#plans"><button class="btn btn-outline">Voir les plans</button></a>
+      </div>
+    </div>
+  </section>
+
+  <section class="features" id="features">
+    <div class="feature">
+      <h3>⚡ Automatisation IA</h3>
+      <p>Candidatures envoyées automatiquement selon ton profil.</p>
+    </div>
+    <div class="feature">
+      <h3>🎯 Ciblage intelligent</h3>
+      <p>Matching précis entre CV et offres pertinentes.</p>
+    </div>
+    <div class="feature">
+      <h3>📊 Suivi en temps réel</h3>
+      <p>Dashboard clair pour suivre chaque candidature.</p>
+    </div>
+  </section>
+
+  <section class="plans" id="plans">
+    <h2>Plans</h2>
+    <p class="subtitle">Choisis l’offre adaptée à ton ambition</p>
+
+    <div class="grid">
+      <div class="card">
+        <h3>Free</h3>
+        <div class="price">0€</div>
+        <p>Découvrir Applyme</p>
+        <a href="auth.html"><button class="btn">Choisir</button></a>
+      </div>
+
+      <div class="card" style="border-color:var(--primary)">
+        <h3>Pro</h3>
+        <div class="price">19€</div>
+        <p>Automatisation complète</p>
+        <a href="checkout.html"><button class="btn">Choisir</button></a>
+      </div>
+
+      <div class="card">
+        <h3>Elite</h3>
+        <div class="price">49€</div>
+        <p>IA avancée & accès prioritaire</p>
+        <a href="checkout.html"><button class="btn">Choisir</button></a>
+      </div>
+    </div>
+  </section>
+
+  <footer>
+    © 2026 Applyme · Tous droits réservés
+  </footer>
+
+</body>
+</html>

@@ -1,0 +1,65 @@
+﻿{
+  "name": "Applyme MVP - Batch (Mock Jobs → API Upsert)",
+  "nodes": [
+    {
+      "parameters": {
+        "path": "applyme-batch",
+        "httpMethod": "POST",
+        "responseMode": "onReceived",
+        "options": {}
+      },
+      "id": "Webhook",
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [280, 220]
+    },
+    {
+      "parameters": {
+        "jsCode": "const body = $json;\n// Jobs mock (remplace par ton vrai scraper/finder plus tard)\nreturn [\n  { batchId: body.batchId, jobUrl: 'https://example.com/job/1', company: 'ACME', title: 'Backend Engineer', recruiterEmail: 'careers@acme.com' },\n  { batchId: body.batchId, jobUrl: 'https://example.com/job/2', company: 'Globex', title: 'Fullstack Engineer', recruiterEmail: 'jobs@globex.com' }\n];"
+      },
+      "id": "MockJobs",
+      "name": "Mock Jobs",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [520, 220]
+    },
+    {
+      "parameters": {
+        "batchSize": 1,
+        "options": {}
+      },
+      "id": "Split",
+      "name": "Split In Batches",
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [740, 220]
+    },
+    {
+      "parameters": {
+        "url": "http://api:8000/internal/applications/upsert",
+        "method": "POST",
+        "sendBody": true,
+        "contentType": "json",
+        "headerParametersJson": "={\"X-Internal-Key\": $env.INTERNAL_API_KEY || \"replace_with_internal_secret\"}",
+        "jsonBody": "={\n  \"batchId\": $json.batchId,\n  \"jobUrl\": $json.jobUrl,\n  \"company\": $json.company,\n  \"title\": $json.title,\n  \"recruiterEmail\": $json.recruiterEmail,\n  \"status\": \"sent\",\n  \"error\": null\n}",
+        "options": {}
+      },
+      "id": "Upsert",
+      "name": "Upsert Application (API)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [960, 220]
+    }
+  ],
+  "connections": {
+    "Webhook": { "main": [[{ "node": "Mock Jobs", "type": "main", "index": 0 }]] },
+    "Mock Jobs": { "main": [[{ "node": "Split In Batches", "type": "main", "index": 0 }]] },
+    "Split In Batches": {
+      "main": [
+        [{ "node": "Upsert Application (API)", "type": "main", "index": 0 }],
+        [{ "node": "Split In Batches", "type": "main", "index": 0 }]
+      ]
+    }
+  }
+}
